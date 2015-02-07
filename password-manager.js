@@ -59,6 +59,12 @@ var keychain = function() {
     */
   keychain.init = function(password) {
     priv.data.version = "CS 255 Password Manager v1.0";
+    priv.data.KVS = {};
+    priv.data.salt = random_bitarray(128);
+    priv.secrets.master_key = KDF(password, priv.data.salt);
+    priv.secrets.cipher = setup_cipher(
+      bitarray_slice(priv.secrets.master_key, 0, 128));
+    ready = true;
   };
 
   /**
@@ -79,7 +85,16 @@ var keychain = function() {
     * Return Type: boolean
     */
   keychain.load = function(password, repr, trusted_data_check) {
-    throw "Not implemented!";
+    if (trusted_data_check &&
+        !bitarray_equal(SHA256(string_to_bitarray(repr)),
+	  trusted_data_check)) {
+	throw "Integrity check failed. Invalid password database.";
+    }
+    priv.data = JSON.parse(repr);
+    priv.secrets.master_key = KDF(password, priv.data.salt);
+    priv.secrets.cipher = setup_cipher(
+      bitarray_slice(priv.secrets.master_key, 0, 128));
+    ready = true;
   };
 
   /**
@@ -96,7 +111,11 @@ var keychain = function() {
     * Return Type: array
     */ 
   keychain.dump = function() {
-    throw "Not implemented!";
+    var arr = [];
+    var repr = JSON.stringify(priv.data);
+    arr[0] = repr;
+    arr[1] = SHA256(string_to_bitarray(repr));
+    return arr;
   }
 
   /**
@@ -110,7 +129,22 @@ var keychain = function() {
     * Return Type: string
     */
   keychain.get = function(name) {
-    throw "Not implemented!";
+    if (!ready) {
+      throw "Password database not ready";
+    }
+    var hkey = HMAC(priv.secrets.master_key, name);
+    if (!(hkey in priv.data.KVS)) {
+      return null;
+    }
+    var payload = dec_gcm(priv.secrets.cipher, priv.data.KVS[hkey]);
+    var tag = bitarray_slice(payload, 0, 256);
+    if (!bitarray_equal(tag, hkey)) {
+       throw "Record tampering detected";
+       ready = false;
+    }
+    var padded_value = bitarray_slice(payload, 256, 256+288);
+    var value = string_from_padded_bitarray(padded_value, 32);
+    return value;
   }
 
   /** 
@@ -125,7 +159,14 @@ var keychain = function() {
   * Return Type: void
   */
   keychain.set = function(name, value) {
-    throw "Not implemented!";
+    if (!ready) {
+      throw "Password database not ready";
+    }
+    var hkey = HMAC(priv.secrets.master_key, name);
+    var padded_value = string_to_padded_bitarray(value, 32);
+    var payload = bitarray_concat(hkey, padded_value);
+    var enc_val = enc_gcm(priv.secrets.cipher, payload);
+    priv.data.KVS[hkey] = enc_val;
   }
 
   /**
@@ -138,7 +179,14 @@ var keychain = function() {
     * Return Type: boolean
   */
   keychain.remove = function(name) {
-    throw "Not implemented!";
+    if (!ready) {
+      throw "Password database not ready";
+    }
+    var hkey = HMAC(priv.secrets.master_key, name);
+    if (!(hkey in priv.data.KVS)) {
+      return false;
+    }
+    return delete priv.data.KVS[hkey];
   }
 
   return keychain;
