@@ -62,8 +62,12 @@ var keychain = function() {
     priv.data.KVS = {};
     priv.data.salt = random_bitarray(128);
     priv.secrets.master_key = KDF(password, priv.data.salt);
-    priv.secrets.cipher = setup_cipher(
-      bitarray_slice(priv.secrets.master_key, 0, 128));
+    priv.data.str1 = "ien230jofajo4#IEL3jkddifbvn39qpe";
+    priv.data.str2 = "5dncnzuOI$(#)NDKLEianeiei40slaek";
+    priv.secrets.enc_key = HMAC(priv.secrets.master_key, priv.data.str1);
+    priv.secrets.mac_key = HMAC(priv.secrets.master_key, priv.data.str2);
+    priv.secrets.enc_cipher = setup_cipher(
+      bitarray_slice(priv.secrets.enc_key, 0, 128));
     ready = true;
   };
 
@@ -92,8 +96,10 @@ var keychain = function() {
     }
     priv.data = JSON.parse(repr);
     priv.secrets.master_key = KDF(password, priv.data.salt);
-    priv.secrets.cipher = setup_cipher(
-      bitarray_slice(priv.secrets.master_key, 0, 128));
+    priv.secrets.enc_key = HMAC(priv.secrets.master_key, priv.data.str1);
+    priv.secrets.mac_key = HMAC(priv.secrets.master_key, priv.data.str2);
+    priv.secrets.enc_cipher = setup_cipher(
+      bitarray_slice(priv.secrets.enc_key, 0, 128));
     ready = true;
   };
 
@@ -132,11 +138,11 @@ var keychain = function() {
     if (!ready) {
       throw "Password database not ready";
     }
-    var hkey = HMAC(priv.secrets.master_key, name);
+    var hkey = HMAC(priv.secrets.mac_key, name);
     if (!(hkey in priv.data.KVS)) {
       return null;
     }
-    var payload = dec_gcm(priv.secrets.cipher, priv.data.KVS[hkey]);
+    var payload = dec_gcm(priv.secrets.enc_cipher, priv.data.KVS[hkey]);
     var tag = bitarray_slice(payload, 0, 256);
     if (!bitarray_equal(tag, hkey)) {
        throw "Record tampering detected";
@@ -162,10 +168,10 @@ var keychain = function() {
     if (!ready) {
       throw "Password database not ready";
     }
-    var hkey = HMAC(priv.secrets.master_key, name);
+    var hkey = HMAC(priv.secrets.mac_key, name);
     var padded_value = string_to_padded_bitarray(value, 32);
     var payload = bitarray_concat(hkey, padded_value);
-    var enc_val = enc_gcm(priv.secrets.cipher, payload);
+    var enc_val = enc_gcm(priv.secrets.enc_cipher, payload);
     priv.data.KVS[hkey] = enc_val;
   }
 
@@ -182,7 +188,7 @@ var keychain = function() {
     if (!ready) {
       throw "Password database not ready";
     }
-    var hkey = HMAC(priv.secrets.master_key, name);
+    var hkey = HMAC(priv.secrets.mac_key, name);
     if (!(hkey in priv.data.KVS)) {
       return false;
     }
