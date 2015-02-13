@@ -75,8 +75,22 @@ var keychain = function() {
     priv.data.KVS = {};
     var salt = random_bitarray(128);
     setup_keys(password, salt);
+    priv.data.update_num = 1;
     ready = true;
   };
+
+  
+  // We assume a 32 bit update_num.
+  // This function breaks the encapsulation
+  function update_num_to_bitarray(update_num) {
+    return [update_num];
+  }
+
+  function header_mac() {
+    return HMAC(priv.secrets.mac_key,
+      bitarray_concat(update_num_to_bitarray(priv.data.update_num),
+                      priv.secrets.master_key));
+  }
 
   /**
     * Loads the keychain state from the provided representation (repr). The
@@ -95,16 +109,54 @@ var keychain = function() {
     *   trusted_data_check: string
     * Return Type: boolean
     */
+  /** Note: We are using trusted_data_check as an update number rather than
+    * a SHA-256 checksum.
+    */
   keychain.load = function(password, repr, trusted_data_check) {
-    if (trusted_data_check &&
-        !bitarray_equal(SHA256(string_to_bitarray(repr)),
-	  trusted_data_check)) {
-	throw "Integrity check failed. Invalid password database.";
+    var valid = true;
+    ready = false;
+    try {
+      priv.data = JSON.parse(repr);
+    } catch (err) {
+      valid = false;
     }
-    priv.data = JSON.parse(repr);
+
     setup_keys(password, priv.data.salt);
+
+    // If the update number is not available from the trusted store,
+    // we will use the one in the database dump. We need this to generate
+    // the next update number. 
+    if (valid && trusted_data_check) {
+      if (priv.data.update_num != trusted_data_check) {
+        valid = false;
+      }
+    }
+
+    // Check if master password is valid.
+    // In case update number didn't come from trusted store, this
+    // also authenticates the update number in the header.
+    if (valid && !bitarray_equal(header_mac(),priv.data.header_mac)) {
+      return false;
+    }
+
+    if (!valid) {
+      throw "Integrity check failed. Invalid password database.";
+    }
     ready = true;
+    return true;
   };
+
+  function mac_after_encrypt(update_num, hkey, ciphertext) {
+    var input = bitarray_concat(JSON.parse(hkey), ciphertext);
+    input = bitarray_concat(update_num_to_bitarray(update_num), input);
+    return HMAC(priv.secrets.mac_key, input);
+  }
+
+  // Check if the value in a KVS entry is properly authenticated.
+  function is_valid_entry(update_num, hkey, entry) {
+    var mac = mac_after_encrypt(update_num, hkey, entry.ciphertext);
+    return bitarray_equal(entry.mac, mac);
+  }
 
   /**
     * Returns a JSON serialization of the contents of the keychain that can be 
@@ -120,10 +172,25 @@ var keychain = function() {
     * Return Type: array
     */ 
   keychain.dump = function() {
+    // This is an update. Increment update_num and re-auth all keys with
+    // new upate_num.
+    // We assume password manager is single threaded. Otherwise, it
+    // has to be locked during dump.
+    priv.data.update_num++;
+    for (var hkey in priv.data.KVS) {
+      var entry = priv.data.KVS[hkey];
+      if (!is_valid_entry(priv.data.update_num-1, hkey, entry)) {
+        ready = false;
+        throw "Record tampering detected";
+      }
+      entry.mac = mac_after_encrypt(priv.data.update_num,
+                                    hkey, entry.ciphertext);
+    }
+    priv.data.header_mac = header_mac();
     var arr = [];
     var repr = JSON.stringify(priv.data);
     arr[0] = repr;
-    arr[1] = SHA256(string_to_bitarray(repr));
+    arr[1] = priv.data.update_num;
     return arr;
   }
 
@@ -141,19 +208,17 @@ var keychain = function() {
     if (!ready) {
       throw "Password database not ready";
     }
-    var hkey = HMAC(priv.secrets.mac_key, name);
+    var hkey = JSON.stringify(HMAC(priv.secrets.mac_key, name));
     if (!(hkey in priv.data.KVS)) {
       return null;
     }
-    var payload = dec_gcm(priv.secrets.enc_cipher, priv.data.KVS[hkey]);
-    var tag = bitarray_slice(payload, 0, 256);
-    if (!bitarray_equal(tag, hkey)) {
-       throw "Record tampering detected";
-       ready = false;
+    var entry = priv.data.KVS[hkey];
+    if (!is_valid_entry(priv.data.update_num, hkey, entry)) {
+      ready = false;
+      throw "Record tampering detected";
     }
-    var padded_value = bitarray_slice(payload, 256, 256+288);
-    var value = string_from_padded_bitarray(padded_value, 32);
-    return value;
+    var padded_value = dec_gcm(priv.secrets.enc_cipher, entry.ciphertext);
+    return string_from_padded_bitarray(padded_value, 32);
   }
 
   /** 
@@ -171,11 +236,13 @@ var keychain = function() {
     if (!ready) {
       throw "Password database not ready";
     }
-    var hkey = HMAC(priv.secrets.mac_key, name);
+    var entry = {};
+    var hkey = JSON.stringify(HMAC(priv.secrets.mac_key, name));
     var padded_value = string_to_padded_bitarray(value, 32);
-    var payload = bitarray_concat(hkey, padded_value);
-    var enc_val = enc_gcm(priv.secrets.enc_cipher, payload);
-    priv.data.KVS[hkey] = enc_val;
+    entry.ciphertext = enc_gcm(priv.secrets.enc_cipher, padded_value);
+    entry.mac = mac_after_encrypt(priv.data.update_num,
+                                  hkey, entry.ciphertext);
+    priv.data.KVS[hkey] = entry;
   }
 
   /**
@@ -191,7 +258,7 @@ var keychain = function() {
     if (!ready) {
       throw "Password database not ready";
     }
-    var hkey = HMAC(priv.secrets.mac_key, name);
+    var hkey = JSON.stringify(HMAC(priv.secrets.mac_key, name));
     if (!(hkey in priv.data.KVS)) {
       return false;
     }
