@@ -155,8 +155,9 @@ var keychain = function() {
   }
 
   // Check if the value in a KVS entry is properly authenticated.
-  function is_valid_entry(update_num, hkey, entry) {
-    var mac = mac_after_encrypt(update_num, hkey, entry.ciphertext);
+  function is_valid_entry(hkey) {
+    var entry = priv.data.KVS[hkey];
+    var mac = mac_after_encrypt(priv.data.update_num, hkey, entry.ciphertext);
     return bitarray_equal(entry.mac, mac);
   }
 
@@ -174,20 +175,19 @@ var keychain = function() {
     * Return Type: array
     */ 
   keychain.dump = function() {
-    // This is an update. Increment update_num and re-auth all keys with
-    // new upate_num.
+    // This is an update. Re-auth all keys with incremented upate_num.
     // We assume password manager is single threaded. Otherwise, it
     // has to be locked during dump.
-    priv.data.update_num++;
     for (var hkey in priv.data.KVS) {
       var entry = priv.data.KVS[hkey];
-      if (!is_valid_entry(priv.data.update_num-1, hkey, entry)) {
+      if (!is_valid_entry(hkey)) {
         ready = false;
         throw "Record tampering detected";
       }
-      entry.mac = mac_after_encrypt(priv.data.update_num,
+      entry.mac = mac_after_encrypt(priv.data.update_num+1,
                                     hkey, entry.ciphertext);
     }
+    priv.data.update_num++;
     priv.data.header_mac = header_mac();
     var arr = [];
     var repr = JSON.stringify(priv.data);
@@ -215,7 +215,7 @@ var keychain = function() {
       return null;
     }
     var entry = priv.data.KVS[hkey];
-    if (!is_valid_entry(priv.data.update_num, hkey, entry)) {
+    if (!is_valid_entry(hkey)) {
       ready = false;
       throw "Record tampering detected";
     }
