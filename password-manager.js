@@ -55,6 +55,7 @@ var keychain = function() {
 
   function setup_keys(master_password, salt) {
     priv.data.salt = salt;
+    priv.secrets = {};
     priv.secrets.master_key = KDF(master_password, priv.data.salt);
     priv.secrets.mac_key = HMAC(priv.secrets.master_key, mac_key_str);
     priv.secrets.enc_key = HMAC(priv.secrets.master_key, enc_key_str);
@@ -71,6 +72,7 @@ var keychain = function() {
     * Return Type: void
     */
   keychain.init = function(password) {
+    priv.data = {};
     priv.data.version = "CS 255 Password Manager v1.0";
     priv.data.KVS = {};
     var salt = random_bitarray(128);
@@ -218,7 +220,7 @@ var keychain = function() {
       throw "Record tampering detected";
     }
     var padded_value = dec_gcm(priv.secrets.enc_cipher, entry.ciphertext);
-    return string_from_padded_bitarray(padded_value, 32);
+    return string_from_padded_bitarray(padded_value, MAX_PW_LEN_BYTES);
   }
 
   /** 
@@ -238,7 +240,7 @@ var keychain = function() {
     }
     var entry = {};
     var hkey = JSON.stringify(HMAC(priv.secrets.mac_key, name));
-    var padded_value = string_to_padded_bitarray(value, 32);
+    var padded_value = string_to_padded_bitarray(value, MAX_PW_LEN_BYTES);
     entry.ciphertext = enc_gcm(priv.secrets.enc_cipher, padded_value);
     entry.mac = mac_after_encrypt(priv.data.update_num,
                                   hkey, entry.ciphertext);
