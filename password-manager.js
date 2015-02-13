@@ -43,11 +43,24 @@ var keychain = function() {
 
   // Maximum length of each record in bytes
   var MAX_PW_LEN_BYTES = 64;
-  
+ 
+  // Strings to hash for generating keys.
+  var mac_key_str = "ien230jofajo4#IEL3jkddifbvn39qpe";
+  var enc_key_str = "5dncnzuOI$(#)NDKLEianeiei40slaek";
+ 
   // Flag to indicate whether password manager is "ready" or not
   var ready = false;
 
   var keychain = {};
+
+  function setup_keys(master_password, salt) {
+    priv.data.salt = salt;
+    priv.secrets.master_key = KDF(master_password, priv.data.salt);
+    priv.secrets.mac_key = HMAC(priv.secrets.master_key, mac_key_str);
+    priv.secrets.enc_key = HMAC(priv.secrets.master_key, enc_key_str);
+    priv.secrets.enc_cipher = setup_cipher(
+      bitarray_slice(priv.secrets.enc_key, 0, 128));
+  }
 
   /** 
     * Creates an empty keychain with the given password. Once init is called,
@@ -60,14 +73,8 @@ var keychain = function() {
   keychain.init = function(password) {
     priv.data.version = "CS 255 Password Manager v1.0";
     priv.data.KVS = {};
-    priv.data.salt = random_bitarray(128);
-    priv.secrets.master_key = KDF(password, priv.data.salt);
-    priv.data.str1 = "ien230jofajo4#IEL3jkddifbvn39qpe";
-    priv.data.str2 = "5dncnzuOI$(#)NDKLEianeiei40slaek";
-    priv.secrets.enc_key = HMAC(priv.secrets.master_key, priv.data.str1);
-    priv.secrets.mac_key = HMAC(priv.secrets.master_key, priv.data.str2);
-    priv.secrets.enc_cipher = setup_cipher(
-      bitarray_slice(priv.secrets.enc_key, 0, 128));
+    var salt = random_bitarray(128);
+    setup_keys(password, salt);
     ready = true;
   };
 
@@ -95,11 +102,7 @@ var keychain = function() {
 	throw "Integrity check failed. Invalid password database.";
     }
     priv.data = JSON.parse(repr);
-    priv.secrets.master_key = KDF(password, priv.data.salt);
-    priv.secrets.enc_key = HMAC(priv.secrets.master_key, priv.data.str1);
-    priv.secrets.mac_key = HMAC(priv.secrets.master_key, priv.data.str2);
-    priv.secrets.enc_cipher = setup_cipher(
-      bitarray_slice(priv.secrets.enc_key, 0, 128));
+    setup_keys(password, priv.data.salt);
     ready = true;
   };
 
