@@ -83,9 +83,14 @@ var keychain = function() {
 
   
   // We assume a 32 bit update_num.
-  // This function breaks the encapsulation
   function update_num_to_bitarray(update_num) {
-    return [update_num];
+    var bytes = [];
+    // Big endian.
+    bytes[0] = (update_num >> 24) & 255;
+    bytes[1] = (update_num >> 16) & 255;
+    bytes[2] = (update_num >>  8) & 255;
+    bytes[3] = (update_num      ) & 255;
+    return hex_to_bitarray(byte_array_to_hex(bytes));
   }
 
   function header_mac() {
