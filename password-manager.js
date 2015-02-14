@@ -154,7 +154,7 @@ var keychain = function() {
   };
 
   function mac_after_encrypt(update_num, hkey, ciphertext) {
-    var input = bitarray_concat(JSON.parse(hkey), ciphertext);
+    var input = bitarray_concat(hex_to_bitarray(hkey), ciphertext);
     input = bitarray_concat(update_num_to_bitarray(update_num), input);
     return HMAC(priv.secrets.mac_key, input);
   }
@@ -215,7 +215,7 @@ var keychain = function() {
     if (!ready) {
       throw "Password database not ready";
     }
-    var hkey = JSON.stringify(HMAC(priv.secrets.mac_key, name));
+    var hkey = bitarray_to_hex(HMAC(priv.secrets.mac_key, name));
     if (!(hkey in priv.data.KVS)) {
       return null;
     }
@@ -244,7 +244,7 @@ var keychain = function() {
       throw "Password database not ready";
     }
     var entry = {};
-    var hkey = JSON.stringify(HMAC(priv.secrets.mac_key, name));
+    var hkey = bitarray_to_hex(HMAC(priv.secrets.mac_key, name));
     var padded_value = string_to_padded_bitarray(value, MAX_PW_LEN_BYTES);
     entry.ciphertext = enc_gcm(priv.secrets.enc_cipher, padded_value);
     entry.mac = mac_after_encrypt(priv.data.update_num,
@@ -265,7 +265,7 @@ var keychain = function() {
     if (!ready) {
       throw "Password database not ready";
     }
-    var hkey = JSON.stringify(HMAC(priv.secrets.mac_key, name));
+    var hkey = bitarray_to_hex(HMAC(priv.secrets.mac_key, name));
     if (!(hkey in priv.data.KVS)) {
       return false;
     }
